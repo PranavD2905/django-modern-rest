@@ -26,6 +26,15 @@ Prompts of the three latest breaking releases also live in the
 ask your coding agent to use `$dmr-upgrade` to upgrade a project.
 
 
+## Unreleased
+
+### Misc
+
+- Changed the `wrap_middleware` example in the `dmr` agent skill
+  to use a custom middleware instead of `csrf_protect`,
+  since `csrf_exempt = False` is the right way to protect controllers, #1671
+
+
 ## 0.16.0 (2026-10-01)
 
 This release was a part of our community event #opensource_september.

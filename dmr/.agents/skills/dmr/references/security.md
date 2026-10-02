@@ -121,56 +121,82 @@ Docs: https://django-modern-rest.readthedocs.io/en/latest/pages/throttling.html
 Wrong:
 
 ```python
-from django.views.decorators.csrf import csrf_protect
+from collections.abc import Callable
+from http import HTTPStatus
 
-from dmr import Controller
-from dmr.plugins.msgspec import MsgspecSerializer
+from django.conf import settings
+from django.http import HttpRequest, HttpResponse
 
 
-@csrf_protect  # not tracked in OpenAPI, no response validation
-class ProtectedController(Controller[MsgspecSerializer]):
-    def post(self) -> dict[str, str]:
-        return {'message': 'created'}
+def maintenance_middleware(
+    get_response: Callable[[HttpRequest], HttpResponse],
+) -> Callable[[HttpRequest], HttpResponse]:
+    def decorator(request: HttpRequest) -> HttpResponse:
+        if settings.MAINTENANCE_MODE:
+            # plain text, not tracked in OpenAPI, no response validation
+            return HttpResponse(status=HTTPStatus.SERVICE_UNAVAILABLE)
+        return get_response(request)
+
+    return decorator
+
+
+# settings.py
+MIDDLEWARE = [
+    # ...
+    'app.middleware.maintenance_middleware',
+]
 ```
 
 Correct:
 
 ```python
+from collections.abc import Callable
 from http import HTTPStatus
 
-from django.http import HttpResponse
-from django.views.decorators.csrf import csrf_protect
+from django.conf import settings
+from django.http import HttpRequest, HttpResponse
 
 from dmr import Controller, ResponseSpec
-from dmr.response import build_response
 from dmr.decorators import wrap_middleware
 from dmr.errors import ErrorModel, format_error
 from dmr.plugins.msgspec import MsgspecSerializer
+from dmr.response import build_response
+
+
+def maintenance_middleware(
+    get_response: Callable[[HttpRequest], HttpResponse],
+) -> Callable[[HttpRequest], HttpResponse]:
+    def decorator(request: HttpRequest) -> HttpResponse:
+        if settings.MAINTENANCE_MODE:
+            return HttpResponse(status=HTTPStatus.SERVICE_UNAVAILABLE)
+        return get_response(request)
+
+    return decorator
 
 
 @wrap_middleware(
-    csrf_protect,
+    maintenance_middleware,
     ResponseSpec(
         return_type=ErrorModel,
-        status_code=HTTPStatus.FORBIDDEN,
+        status_code=HTTPStatus.SERVICE_UNAVAILABLE,
     ),
 )
-def csrf_protect_json(response: HttpResponse) -> HttpResponse:
+def maintenance_json(response: HttpResponse) -> HttpResponse:
     return build_response(
         MsgspecSerializer,
-        raw_data=format_error('csrf error'),
-        status_code=HTTPStatus.FORBIDDEN,
+        raw_data=format_error('Service is under maintenance'),
+        status_code=HTTPStatus.SERVICE_UNAVAILABLE,
     )
 
 
-@csrf_protect_json
-class ProtectedController(Controller[MsgspecSerializer]):
-    responses = csrf_protect_json.responses
+@maintenance_json
+class UserController(Controller[MsgspecSerializer]):
+    responses = maintenance_json.responses
 
-    def post(self) -> dict[str, str]:
-        return {'message': 'created'}
+    def get(self) -> dict[str, str]:
+        return {'message': 'hello'}
 ```
 
-**Limitations:** `wrap_middleware` handles both sync and async automatically — always add `responses = wrapped_func.responses` to the controller for OpenAPI docs.
+**Limitations:** `wrap_middleware` handles both sync and async automatically — always add `responses = wrapped_func.responses` to the controller for OpenAPI docs. Do not wrap `csrf_protect` or `login_required`: use `csrf_exempt = False` and `auth` instead.
 
 Docs: https://django-modern-rest.readthedocs.io/en/latest/pages/middleware.html
